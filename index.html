@@ -101,6 +101,16 @@
     100% { box-shadow: 0 0 30px rgba(247, 147, 26, 0.2) inset, 0 0 10px rgba(247, 147, 26, 0.5); background: rgba(20, 20, 25, 0.85); }
   }
 
+  /* Merge pulse — quick flash when a tx absorbs into the cube */
+  @keyframes mergePulse {
+    0% { box-shadow: 0 0 80px rgba(247, 147, 26, 0.8) inset, 0 0 60px rgba(247, 147, 26, 0.6); transform: scale(1.08); }
+    50% { box-shadow: 0 0 100px rgba(247, 147, 26, 1) inset, 0 0 80px rgba(247, 147, 26, 0.8); transform: scale(1.12); }
+    100% { box-shadow: 0 0 30px rgba(247, 147, 26, 0.2) inset, 0 0 10px rgba(247, 147, 26, 0.5); transform: scale(1); }
+  }
+  .cube-merge-pulse .cube-face {
+    animation: mergePulse 0.4s ease-out !important;
+  }
+
   /* --- LAYOUT --- */
   #canvas-bg {
     position: fixed;
@@ -627,6 +637,7 @@
   let largestTx = 0; // track the biggest tx in satoshis
 
   let particles = [];
+  let mergeEffects = []; // expanding ring effects on merge
   let isSimulated = false;
   let connectionStatus = 'connecting';
   let miningFlash = false;
@@ -640,10 +651,11 @@
   class TxParticle {
     constructor(value) {
       this.value = value;
-      // Dramatic size scaling: log10 of satoshis (3→9) * 3.5 = 10→32px range
       this.maxRadius = Math.max(4, Math.min(32, Math.log10(Math.max(value, 1000)) * 3.5));
-      this.radius = 0; // starts at 0, animates up
+      this.radius = 0;
       this.spawnFrame = 0;
+      this.phase = 'approach'; // 'approach' → 'dive' → (merged)
+      this.diveSpeed = 6 + Math.random() * 10;
       const edge = Math.floor(Math.random() * 4);
       if (edge === 0) { this.x = Math.random() * W; this.y = -10; }
       else if (edge === 1) { this.x = W + 10; this.y = Math.random() * H; }
@@ -652,14 +664,13 @@
       this.targetX = W / 2;
       this.targetY = H / 2;
       this.angle = Math.random() * Math.PI * 2;
-      this.orbitRadius = 150 + Math.random() * 300;
-      this.orbitSpeed = 0.005 + Math.random() * 0.015;
-      this.approachSpeed = 0.02 + Math.random() * 0.03;
+      this.orbitRadius = 300 + Math.random() * 250;
+      this.orbitSpeed = 0.008 + Math.random() * 0.015;
+      this.approachSpeed = 0.015 + Math.random() * 0.025;
       const isHighValue = value > 1000000000;
       this.color = isHighValue ? '#ffffff' : '#f7931a';
       this.glow = isHighValue ? 30 : 10;
       this.alpha = 0;
-      // Format satoshi label
       this.label = value >= 100000000
         ? (value / 100000000).toFixed(2) + ' BTC'
         : value >= 10000
@@ -669,54 +680,109 @@
     update(isExploding) {
       this.targetX = W / 2;
       this.targetY = H / 2;
+
       if (isExploding) {
+        if (this.phase !== 'explode') {
+          this.phase = 'explode';
+        }
         this.orbitRadius += 20;
         this.alpha -= 0.05;
-      } else {
-        this.orbitRadius = Math.max(120, this.orbitRadius - this.approachSpeed * 100);
+        this.x = this.targetX + Math.cos(this.angle) * this.orbitRadius;
+        this.y = this.targetY + Math.sin(this.angle) * this.orbitRadius;
+        return;
+      }
+
+      if (this.phase === 'approach') {
+        // Move toward orbit
+        this.orbitRadius = Math.max(220, this.orbitRadius - this.approachSpeed * 100);
         this.angle += this.orbitSpeed;
+        this.x = this.targetX + Math.cos(this.angle) * this.orbitRadius;
+        this.y = this.targetY + Math.sin(this.angle) * this.orbitRadius;
+
         if (this.alpha < 1) this.alpha += 0.02;
-        // Spawn animation: radius grows from 0 with slight overshoot
         this.spawnFrame++;
         if (this.spawnFrame < 20) {
           const t = this.spawnFrame / 20;
-          // Ease-out with overshoot (bouncy blip)
           this.radius = this.maxRadius * (1 - Math.pow(1 - t, 3)) * (1 + 0.2 * Math.sin(t * Math.PI * 2));
         } else {
           this.radius = this.maxRadius;
         }
+
+        // Transition to dive when close enough
+        if (this.orbitRadius <= 225 && this.spawnFrame > 15) {
+          this.phase = 'dive';
+          // Calculate direct angle toward center
+          this.dx = this.targetX - this.x;
+          this.dy = this.targetY - this.y;
+          const dist = Math.sqrt(this.dx * this.dx + this.dy * this.dy);
+          if (dist > 0) { this.dx /= dist; this.dy /= dist; }
+          this.speed = this.diveSpeed;
+        }
+      } else if (this.phase === 'dive') {
+        // Dive straight toward center
+        this.x += this.dx * this.speed;
+        this.y += this.dy * this.speed;
+        this.speed *= 1.04; // accelerate
+        if (this.radius < this.maxRadius) this.radius += 0.5;
+
+        // Shrink and brighten as it nears the cube
+        const dx = this.targetX - this.x;
+        const dy = this.targetY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 65) {
+          // MERGE into the cube!
+          return 'merge';
+        }
+
+        // Trail effect: leave a fading copy at current position
+        // Handled via the fade in renderCanvas
       }
-      // Update orbital position
-      this.x = this.targetX + Math.cos(this.angle) * this.orbitRadius;
-      this.y = this.targetY + Math.sin(this.angle) * this.orbitRadius;
+      // Update position (already set above, but for completeness)
     }
     draw() {
       if (this.alpha <= 0) return;
-      // Outer glow ring (spawn animation flash)
-      if (this.spawnFrame < 30) {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(247, 147, 26, ${0.3 * (1 - this.spawnFrame/30)})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
+      if (this.phase === 'dive') {
+        // Draw speed trail
+        if (this.spawnFrame > 0) {
+          ctx.beginPath();
+          ctx.arc(this.x - this.dx * 8, this.y - this.dy * 8, this.radius * 0.6, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(247, 147, 26, ${this.alpha * 0.2})`;
+          ctx.fill();
+        }
+        // Brighter glow when diving
+        ctx.shadowBlur = this.glow * 2;
+        ctx.shadowColor = '#f7931a';
       }
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
       ctx.fillStyle = this.color === '#ffffff' 
         ? `rgba(255,255,255,${this.alpha})` 
         : `rgba(247,147,26,${this.alpha})`;
-      ctx.shadowBlur = this.glow;
+      ctx.shadowBlur = this.phase === 'dive' ? this.glow * 2 : this.glow;
       ctx.shadowColor = this.color;
       ctx.fill();
       ctx.shadowBlur = 0;
-      // Satoshi label on bigger particles
-      if (this.maxRadius >= 14 && this.alpha > 0.7) {
+
+      // Satoshi label
+      if (this.maxRadius >= 14 && this.alpha > 0.7 && this.phase !== 'dive') {
         ctx.font = '9px "Courier New", monospace';
         ctx.textAlign = 'center';
         ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha * 0.7})`;
         ctx.fillText(this.label, this.x, this.y - this.radius - 6);
       }
     }
+  }
+
+  // ===== CUBE PULSE ON MERGE =====
+  function pulseCube() {
+    const cube = document.getElementById('the-cube');
+    if (!cube) return;
+    cube.classList.remove('cube-merge-pulse');
+    // Force reflow then add class
+    void cube.offsetWidth;
+    cube.classList.add('cube-merge-pulse');
+    setTimeout(() => cube.classList.remove('cube-merge-pulse'), 400);
   }
 
   // ===== RENDER LOOP =====
@@ -745,14 +811,50 @@
       }
     }
 
-    // Update & draw particles
+    // Update & draw particles — check for merges
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
-      p.update(isExploding);
+      const mergeSignal = p.update(isExploding);
       p.draw();
-      if (isExploding && p.alpha <= 0) {
+      if (mergeSignal === 'merge') {
+        // Create expanding ring effect at merge point
+        mergeEffects.push({
+          x: p.x, y: p.y,
+          radius: p.radius,
+          maxRadius: p.maxRadius * 4,
+          alpha: 1,
+          color: p.color
+        });
+        pulseCube();
+        particles.splice(i, 1);
+      } else if (isExploding && p.alpha <= 0) {
         particles.splice(i, 1);
       }
+    }
+
+    // Draw & update merge effects (expanding rings)
+    for (let i = mergeEffects.length - 1; i >= 0; i--) {
+      const m = mergeEffects[i];
+      m.radius += 2;
+      m.alpha -= 0.025;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = m.color === '#ffffff'
+        ? `rgba(255,255,255,${m.alpha})`
+        : `rgba(247,147,26,${m.alpha})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Inner glow
+      if (m.alpha > 0.5) {
+        const innerGrad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.radius * 0.5);
+        innerGrad.addColorStop(0, `rgba(247,147,26,${m.alpha * 0.3})`);
+        innerGrad.addColorStop(1, 'rgba(247,147,26,0)');
+        ctx.fillStyle = innerGrad;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.radius * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (m.alpha <= 0) mergeEffects.splice(i, 1);
     }
 
     // Center vortex glow
@@ -799,6 +901,7 @@
         animationId = requestAnimationFrame(explodeLoop);
       } else {
         particles = [];
+        mergeEffects = [];
         txCount = 0;
         txVolume = 0;
         largestTx = 0;
