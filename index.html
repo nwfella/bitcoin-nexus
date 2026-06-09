@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitcoin NEXUS</title>
+<style>
+  /* --- RESET & BASE --- */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Courier New', monospace;
+    background: #0a0a0f;
+    color: #e5e7eb;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    user-select: none;
+  }
+  ::selection { background: rgba(247, 147, 26, 0.3); }
+
+  /* --- SCANLINE --- */
+  .scanline {
+    width: 100%;
+    height: 100px;
+    z-index: 50;
+    position: fixed;
+    pointer-events: none;
+    background: linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(247,147,26,0.1) 50%, rgba(0,0,0,0) 100%);
+    opacity: 0.1;
+    animation: scan 8s linear infinite;
+  }
+  @keyframes scan {
+    0% { top: -100px; }
+    100% { top: 100%; }
+  }
+
+  /* --- SCREEN FLASH --- */
+  .screen-flash {
+    position: fixed;
+    inset: 0;
+    background: #f7931a;
+    z-index: 40;
+    pointer-events: none;
+    transition: opacity 1s ease;
+    opacity: 0;
+  }
+  .screen-flash.active { opacity: 0.3; }
+
+  /* --- GLASS PANEL --- */
+  .glass-panel {
+    background: rgba(10, 10, 15, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(247, 147, 26, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  /* --- 3D CUBE --- */
+  .cube-container {
+    perspective: 1200px;
+    width: 200px;
+    height: 200px;
+  }
+  .cube {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    transform-style: preserve-3d;
+    animation: rotateCube 20s infinite linear;
+  }
+  .cube-face {
+    position: absolute;
+    width: 200px;
+    height: 200px;
+    background: rgba(20, 20, 25, 0.85);
+    border: 2px solid rgba(247, 147, 26, 0.6);
+    box-shadow: 0 0 30px rgba(247, 147, 26, 0.2) inset, 0 0 10px rgba(247, 147, 26, 0.5);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    color: #f7931a;
+  }
+  .cube-face.mined {
+    animation: pulseGlow 2s ease-out;
+  }
+  .front  { transform: translateZ(100px); }
+  .back   { transform: rotateY(180deg) translateZ(100px); }
+  .right  { transform: rotateY(90deg) translateZ(100px); }
+  .left   { transform: rotateY(-90deg) translateZ(100px); }
+  .top    { transform: rotateX(90deg) translateZ(100px); }
+  .bottom { transform: rotateX(-90deg) translateZ(100px); }
+  @keyframes rotateCube {
+    0% { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
+    100% { transform: rotateX(360deg) rotateY(360deg) rotateZ(180deg); }
+  }
+  @keyframes pulseGlow {
+    0% { box-shadow: 0 0 50px rgba(247, 147, 26, 1) inset, 0 0 50px rgba(247, 147, 26, 1); background: rgba(247, 147, 26, 0.4); }
+    100% { box-shadow: 0 0 30px rgba(247, 147, 26, 0.2) inset, 0 0 10px rgba(247, 147, 26, 0.5); background: rgba(20, 20, 25, 0.85); }
+  }
+
+  /* --- LAYOUT --- */
+  #canvas-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+  header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 24px;
+    z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none;
+  }
+  .header-title {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.05em;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    filter: drop-shadow(0 0 15px rgba(247,147,26,0.8));
+  }
+  .header-title .orange { color: #f7931a; }
+  .header-sub {
+    font-size: 14px;
+    color: #9ca3af;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .badge.sim { color: #a78bfa; background: rgba(91,33,182,0.3); border: 1px solid rgba(168,85,247,0.3); }
+  .badge.live { color: #4ade80; background: rgba(22,163,74,0.3); border: 1px solid rgba(74,222,128,0.3); }
+
+  /* --- MAIN OVERLAY --- */
+  .main-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 32px;
+    pointer-events: none;
+  }
+
+  /* --- LEFT PANEL --- */
+  .left-panel {
+    width: 288px;
+    padding: 24px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    pointer-events: auto;
+    transition: transform 0.3s;
+  }
+  .left-panel:hover { transform: scale(1.05); }
+  .panel-title {
+    font-size: 12px;
+    color: rgba(247,147,26,0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .stat-box {
+    background: rgba(0,0,0,0.4);
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .stat-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+  .stat-value {
+    font-size: 30px;
+    font-weight: 300;
+    color: white;
+  }
+  .stat-value.small { font-size: 24px; }
+  .stat-value.orange { color: #fb923c; }
+  .stat-unit {
+    font-size: 14px;
+    color: #6b7280;
+    margin-left: 4px;
+  }
+  .stat-unit.btc { color: #f7931a; }
+
+  /* --- MINE BUTTON --- */
+  .mine-btn {
+    margin-top: 16px;
+    width: 100%;
+    padding: 12px;
+    background: rgba(247,147,26,0.1);
+    border: 1px solid rgba(247,147,26,0.5);
+    color: #f7931a;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.2s;
+  }
+  .mine-btn:hover { background: rgba(247,147,26,0.2); }
+  .mine-btn .icon { transition: transform 0.3s; }
+  .mine-btn:hover .icon { animation: bounce 0.6s infinite; }
+  @keyframes bounce {
+    0%,100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+
+  /* --- CENTER CUBE --- */
+  .center-area {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+  }
+  .cube-wrapper { position: relative; }
+  .cube-glow {
+    position: absolute;
+    inset: -80px;
+    background: #f7931a;
+    opacity: 0.05;
+    filter: blur(100px);
+    border-radius: 50%;
+  }
+  .cube-number { font-size: 24px; font-weight: 700; }
+  .cube-label { font-size: 12px; letter-spacing: 0.1em; opacity: 0.6; margin-top: 4px; }
+
+  /* --- RIGHT PANEL --- */
+  .right-panel {
+    width: 320px;
+    max-height: 600px;
+    padding: 24px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    overflow: hidden;
+  }
+  .block-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .block-list::-webkit-scrollbar { width: 4px; }
+  .block-list::-webkit-scrollbar-track { background: transparent; }
+  .block-list::-webkit-scrollbar-thumb { background: rgba(247,147,26,0.3); border-radius: 2px; }
+  .block-item {
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.05);
+    background: rgba(0,0,0,0.4);
+    transition: all 0.3s;
+    margin-bottom: 12px;
+  }
+  .block-item:last-child { margin-bottom: 0; }
+  .block-item.latest {
+    background: rgba(247,147,26,0.1);
+    border-color: rgba(247,147,26,0.5);
+  }
+  .block-item:not(.latest) {
+    opacity: 0.7;
+    transform: scale(0.95);
+  }
+  .block-item:not(.latest):hover {
+    opacity: 1;
+    transform: scale(1);
+    cursor: pointer;
+  }
+  .block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .block-height {
+    font-size: 18px;
+    font-weight: 700;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .block-time {
+    font-size: 12px;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .block-hash {
+    font-size: 12px;
+    color: #9ca3af;
+    font-family: 'Courier New', monospace;
+    word-break: break-all;
+    margin-bottom: 8px;
+  }
+  .block-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .block-meta .orange { color: #fb923c; }
+
+  /* --- FOOTER --- */
+  footer {
+    position: fixed;
+    bottom: 16px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    z-index: 10;
+    pointer-events: none;
+  }
+  footer p {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: #4b5563;
+    text-transform: uppercase;
+  }
+
+  /* --- sound toggle --- */
+  .sound-toggle {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #9ca3af;
+    font-size: 12px;
+  }
+  .sound-toggle label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .sound-toggle input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 36px;
+    height: 20px;
+    background: #374151;
+    border-radius: 10px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .sound-toggle input[type="checkbox"]:checked {
+    background: #f7931a;
+  }
+  .sound-toggle input[type="checkbox"]::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .sound-toggle input[type="checkbox"]:checked::after {
+    transform: translateX(16px);
+  }
+</style>
+</head>
+<body>
+
+  <!-- Background Canvas -->
+  <canvas id="canvas-bg"></canvas>
+
+  <!-- Scanline -->
+  <div class="scanline"></div>
+
+  <!-- Screen Flash -->
+  <div id="screen-flash" class="screen-flash"></div>
+
+  <!-- Header -->
+  <header>
+    <div>
+      <div class="header-title">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        BITCOIN <span class="orange">NEXUS</span>
+      </div>
+      <p class="header-sub">
+        <span id="mode-badge" class="badge sim">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><path d="M6 6h.01M6 18h.01"/></svg>
+          Simulation Mode
+        </span>
+        Status: <span id="conn-status">connecting</span>
+      </p>
+    </div>
+    <div class="sound-toggle">
+      <label>
+        <input type="checkbox" id="sound-checkbox" checked>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        Sound
+      </label>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="main-overlay">
+    
+    <!-- Left Panel: Mempool -->
+    <div class="left-panel glass-panel">
+      <div>
+        <div class="panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Mempool Dynamics
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Current TPS</div>
+          <div class="stat-value"><span id="tps-val">0</span><span class="stat-unit">tx/s</span></div>
+        </div>
+        <div class="stat-box" style="margin-top:16px">
+          <div class="stat-label">Unconfirmed Txs</div>
+          <div class="stat-value small orange" id="unconfirmed-val">0</div>
+        </div>
+        <div class="stat-box" style="margin-top:16px">
+          <div class="stat-label">Pending Volume</div>
+          <div class="stat-value small" id="volume-val">0.00<span class="stat-unit btc">BTC</span></div>
+        </div>
+      </div>
+      
+      <button class="mine-btn" id="mine-btn">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Force Mine Block
+      </button>
+    </div>
+
+    <!-- Center: 3D Cube -->
+    <div class="center-area">
+      <div class="cube-wrapper">
+        <div class="cube-glow"></div>
+        <div class="cube-container">
+          <div class="cube" id="the-cube">
+            <div class="cube-face front" data-face="front">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="1.5" style="opacity:0.2;margin-bottom:8px"><path d="M4 4l16 16M20 4L4 20"/></svg>
+              <div class="cube-number" id="cube-height">834,521</div>
+              <div class="cube-label">LATEST</div>
+            </div>
+            <div class="cube-face back" data-face="back">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="1.5" style="opacity:0.2;margin-bottom:8px"><path d="M4 4l16 16M20 4L4 20"/></svg>
+              <div class="cube-number" id="cube-height">834,521</div>
+              <div class="cube-label">LATEST</div>
+            </div>
+            <div class="cube-face right" data-face="right">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="1.5" style="opacity:0.2;margin-bottom:8px"><path d="M4 4l16 16M20 4L4 20"/></svg>
+              <div class="cube-number" id="cube-height">834,521</div>
+              <div class="cube-label">LATEST</div>
+            </div>
+            <div class="cube-face left" data-face="left">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="1.5" style="opacity:0.2;margin-bottom:8px"><path d="M4 4l16 16M20 4L4 20"/></svg>
+              <div class="cube-number" id="cube-height">834,521</div>
+              <div class="cube-label">LATEST</div>
+            </div>
+            <div class="cube-face top" data-face="top">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="1.5" style="opacity:0.2;margin-bottom:8px"><path d="M4 4l16 16M20 4L4 20"/></svg>
+              <div class="cube-number" id="cube-height">834,521</div>
+              <div class="cube-label">LATEST</div>
+            </div>
+            <div class="cube-face bottom" data-face="bottom">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="1.5" style="opacity:0.2;margin-bottom:8px"><path d="M4 4l16 16M20 4L4 20"/></svg>
+              <div class="cube-number" id="cube-height">834,521</div>
+              <div class="cube-label">LATEST</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Panel: Blocks -->
+    <div class="right-panel glass-panel">
+      <div class="panel-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2" ry="2"/><path d="M9 3v18"/><path d="M15 3v18"/><path d="M3 9h2"/><path d="M3 15h2"/><path d="M19 9h2"/><path d="M19 15h2"/></svg>
+        Immutable Ledger
+      </div>
+      <div class="block-list" id="block-list"></div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p>Nodes online • Consensus active • Cryptography secure</p>
+  </footer>
+
+<script>
+(function(){
+  'use strict';
+
+  // ===== SOUND ENGINE =====
+  let audioCtx = null;
+  let soundEnabled = true;
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    return audioCtx;
+  }
+
+  function playBlockMinedSound() {
+    if (!soundEnabled) return;
+    try {
+      const ctx = getAudioCtx();
+      const now = ctx.currentTime;
+
+      // --- Layer 1: Deep sub-bass thump ---
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(60, now);
+      osc1.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+      gain1.gain.setValueAtTime(0.5, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.4);
+
+      // --- Layer 2: Metallic clang (the "block found" ping) ---
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(880, now);
+      osc2.frequency.exponentialRampToValueAtTime(440, now + 0.15);
+      gain2.gain.setValueAtTime(0.3, now);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.3);
+
+      // --- Layer 3: Noise burst (explosion texture) ---
+      const bufferSize = ctx.sampleRate * 0.2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const gain3 = ctx.createGain();
+      gain3.gain.setValueAtTime(0.15, now);
+      gain3.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2000, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + 0.25);
+      noise.connect(filter);
+      filter.connect(gain3);
+      gain3.connect(ctx.destination);
+      noise.start(now);
+      noise.stop(now + 0.25);
+
+      // --- Layer 4: Harmonic chime (success feel) ---
+      const osc3 = ctx.createOscillator();
+      const gain4 = ctx.createGain();
+      osc3.type = 'sine';
+      osc3.frequency.setValueAtTime(1320, now + 0.05);
+      gain4.gain.setValueAtTime(0, now);
+      gain4.gain.linearRampToValueAtTime(0.15, now + 0.08);
+      gain4.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+      osc3.connect(gain4);
+      gain4.connect(ctx.destination);
+      osc3.start(now + 0.05);
+      osc3.stop(now + 0.5);
+
+    } catch(e) {
+      console.warn('Sound error:', e);
+    }
+  }
+
+  // Sound toggle
+  document.getElementById('sound-checkbox').addEventListener('change', function() {
+    soundEnabled = this.checked;
+  });
+
+  // ===== STATE =====
+  const canvas = document.getElementById('canvas-bg');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+
+  let stats = { tps: 0, count: 0, volume: 0 };
+  let txCount = 0;
+  let txVolume = 0;
+  let txsThisSecond = 0;
+
+  let particles = [];
+  let isSimulated = false;
+  let connectionStatus = 'connecting';
+  let miningFlash = false;
+  let animationId = null;
+
+  let latestBlocks = [
+    { height: 834521, size: 1.8, txs: 3412, hash: '000000000000000000021e8...', time: Date.now() - 600000 }
+  ];
+
+  // ===== PARTICLE CLASS =====
+  class TxParticle {
+    constructor(value) {
+      this.value = value;
+      this.radius = Math.max(1.5, Math.min(8, Math.log10(Math.max(value,1)) * 1.5));
+      const edge = Math.floor(Math.random() * 4);
+      if (edge === 0) { this.x = Math.random() * W; this.y = -10; }
+      else if (edge === 1) { this.x = W + 10; this.y = Math.random() * H; }
+      else if (edge === 2) { this.x = Math.random() * W; this.y = H + 10; }
+      else { this.x = -10; this.y = Math.random() * H; }
+      this.targetX = W / 2;
+      this.targetY = H / 2;
+      this.angle = Math.random() * Math.PI * 2;
+      this.orbitRadius = 150 + Math.random() * 300;
+      this.orbitSpeed = 0.005 + Math.random() * 0.015;
+      this.approachSpeed = 0.02 + Math.random() * 0.03;
+      const isHighValue = value > 1000000000;
+      this.color = isHighValue ? '#ffffff' : '#f7931a';
+      this.glow = isHighValue ? 20 : 10;
+      this.alpha = 0;
+    }
+    update(isExploding) {
+      this.targetX = W / 2;
+      this.targetY = H / 2;
+      if (isExploding) {
+        this.orbitRadius += 20;
+        this.alpha -= 0.05;
+      } else {
+        this.orbitRadius = Math.max(120, this.orbitRadius - this.approachSpeed * 100);
+        this.angle += this.orbitSpeed;
+        if (this.alpha < 1) this.alpha += 0.02;
+      }
+      this.x = this.targetX + Math.cos(this.angle) * this.orbitRadius;
+      this.y = this.targetY + Math.sin(this.angle) * this.orbitRadius;
+    }
+    draw() {
+      if (this.alpha <= 0) return;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fillStyle = this.color === '#ffffff' 
+        ? `rgba(255,255,255,${this.alpha})` 
+        : `rgba(247,147,26,${this.alpha})`;
+      ctx.shadowBlur = this.glow;
+      ctx.shadowColor = this.color;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // ===== RENDER LOOP =====
+  function renderCanvas(isExploding) {
+    // Fade for trails
+    ctx.fillStyle = 'rgba(10, 10, 15, 0.2)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Network lines
+    ctx.lineWidth = 0.5;
+    const maxDist = 80;
+    if (particles.length < 150 && !isExploding) {
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < maxDist) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(247, 147, 26, ${0.15 * (1 - dist/maxDist)})`;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Update & draw particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.update(isExploding);
+      p.draw();
+      if (isExploding && p.alpha <= 0) {
+        particles.splice(i, 1);
+      }
+    }
+
+    // Center vortex glow
+    const gradient = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, 200);
+    gradient.addColorStop(0, 'rgba(247, 147, 26, 0.15)');
+    gradient.addColorStop(1, 'rgba(10, 10, 15, 0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(W/2, H/2, 200, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (!isExploding) {
+      animationId = requestAnimationFrame(() => renderCanvas(false));
+    }
+  }
+
+  // ===== ADD TRANSACTION =====
+  function addTransaction(value) {
+    txCount += 1;
+    txVolume += (value / 100000000);
+    txsThisSecond += 1;
+    if (particles.length < 400) {
+      particles.push(new TxParticle(value));
+    }
+  }
+
+  // ===== TRIGGER MINE BLOCK =====
+  function triggerMineBlock() {
+    miningFlash = true;
+    document.getElementById('screen-flash').classList.add('active');
+    
+    // Play sound!
+    playBlockMinedSound();
+
+    // Stop normal loop, run explosion
+    cancelAnimationFrame(animationId);
+    
+    let explosionFrames = 0;
+    function explodeLoop() {
+      renderCanvas(true);
+      explosionFrames++;
+      if (explosionFrames < 60) {
+        animationId = requestAnimationFrame(explodeLoop);
+      } else {
+        particles = [];
+        txCount = 0;
+        txVolume = 0;
+        miningFlash = false;
+        document.getElementById('screen-flash').classList.remove('active');
+        renderCanvas(false);
+      }
+    }
+    explodeLoop();
+
+    // Add to UI blocks
+    const prev = latestBlocks[0];
+    const newBlock = {
+      height: prev.height + 1,
+      size: parseFloat((Math.random() * 0.5 + 1.2).toFixed(2)),
+      txs: txCount || Math.floor(Math.random() * 2000 + 1000),
+      hash: '00000000000000' + Math.random().toString(16).substr(2, 10),
+      time: Date.now()
+    };
+    latestBlocks = [newBlock, ...latestBlocks].slice(0, 5);
+    renderBlocks();
+    updateCubeHeight(newBlock.height);
+  }
+
+  // ===== UI UPDATES =====
+  function updateStats() {
+    document.getElementById('tps-val').textContent = stats.tps;
+    document.getElementById('unconfirmed-val').textContent = stats.count.toLocaleString();
+    document.getElementById('volume-val').innerHTML = stats.volume.toFixed(2) + '<span class="stat-unit btc">BTC</span>';
+  }
+
+  function updateCubeHeight(height) {
+    const els = document.querySelectorAll('.cube-number');
+    for (let i = 0; i < els.length; i++) {
+      els[i].textContent = height.toLocaleString();
+    }
+  }
+
+  function renderBlocks() {
+    const list = document.getElementById('block-list');
+    list.innerHTML = '';
+    latestBlocks.forEach((block, idx) => {
+      const div = document.createElement('div');
+      div.className = 'block-item' + (idx === 0 ? ' latest' : '');
+      
+      const diff = Math.floor((Date.now() - block.time) / 1000);
+      const timeStr = diff < 60 ? diff + 's ago' : Math.floor(diff/60) + 'm ago';
+      
+      div.innerHTML = `
+        <div class="block-header">
+          <span class="block-height">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f7931a" stroke-width="2"><path d="M4 4l16 16M20 4L4 20"/></svg>
+            ${block.height}
+          </span>
+          <span class="block-time">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            ${timeStr}
+          </span>
+        </div>
+        <div class="block-hash">${block.hash}</div>
+        <div class="block-meta">
+          <span>${block.txs} txs</span>
+          <span class="orange">${block.size} MB</span>
+        </div>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  function setMode(simulated) {
+    isSimulated = simulated;
+    const badge = document.getElementById('mode-badge');
+    if (simulated) {
+      badge.className = 'badge sim';
+      badge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><path d="M6 6h.01M6 18h.01"/></svg> Simulation Mode';
+    } else {
+      badge.className = 'badge live';
+      badge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Live Mainnet';
+    }
+  }
+
+  // ===== INIT =====
+  function init() {
+    // Canvas sizing
+    function resize() {
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Render initial blocks
+    renderBlocks();
+    updateCubeHeight(latestBlocks[0].height);
+    updateStats();
+
+    // Start render loop
+    renderCanvas(false);
+
+    // Stats updater (1Hz)
+    setInterval(function() {
+      stats = { tps: txsThisSecond, count: txCount, volume: txVolume };
+      txsThisSecond = 0;
+      updateStats();
+    }, 1000);
+
+    // WebSocket setup
+    let mockInterval;
+    function startSimulation() {
+      if (isSimulated) return;
+      setMode(true);
+      connectionStatus = 'connected';
+      document.getElementById('conn-status').textContent = 'connected';
+      
+      mockInterval = setInterval(function() {
+        const count = Math.floor(Math.random() * 5);
+        for (let i = 0; i < count; i++) {
+          const mockValue = Math.floor(Math.random() * 500000000);
+          addTransaction(mockValue);
+        }
+      }, 200);
+    }
+
+    function connectWs() {
+      try {
+        const ws = new WebSocket('wss://ws.blockchain.info/inv');
+        ws.onopen = function() {
+          connectionStatus = 'connected';
+          setMode(false);
+          document.getElementById('conn-status').textContent = 'connected';
+          ws.send(JSON.stringify({ op: 'unconfirmed_sub' }));
+          ws.send(JSON.stringify({ op: 'blocks_sub' }));
+        };
+        ws.onmessage = function(event) {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.op === 'utx') {
+              const totalOut = data.x.out.reduce((sum, o) => sum + o.value, 0);
+              addTransaction(totalOut);
+            } else if (data.op === 'block') {
+              triggerMineBlock();
+            }
+          } catch(e) {}
+        };
+        ws.onerror = function() {
+          connectionStatus = 'error';
+          document.getElementById('conn-status').textContent = 'error';
+          startSimulation();
+        };
+        ws.onclose = function() {
+          if (connectionStatus !== 'error') {
+            connectionStatus = 'disconnected';
+            document.getElementById('conn-status').textContent = 'disconnected';
+          }
+          startSimulation();
+        };
+      } catch(err) {
+        startSimulation();
+      }
+    }
+
+    connectWs();
+
+    // Fallback after 5 seconds
+    setTimeout(function() {
+      if (txCount === 0 && !isSimulated) {
+        startSimulation();
+      }
+    }, 5000);
+
+    // Mine button
+    document.getElementById('mine-btn').addEventListener('click', triggerMineBlock);
+  }
+
+  // Boot
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
+</script>
+</body>
+</html>
