@@ -686,6 +686,9 @@
           this.radius = this.maxRadius;
         }
       }
+      // Update orbital position
+      this.x = this.targetX + Math.cos(this.angle) * this.orbitRadius;
+      this.y = this.targetY + Math.sin(this.angle) * this.orbitRadius;
     }
     draw() {
       if (this.alpha <= 0) return;
