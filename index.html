@@ -102,10 +102,11 @@
   }
 
   /* Merge pulse — quick flash when a tx absorbs into the cube */
+  /* Only animates glow/brightness — NEVER transform, which would break 3D face positioning */
   @keyframes mergePulse {
-    0% { box-shadow: 0 0 80px rgba(247, 147, 26, 0.8) inset, 0 0 60px rgba(247, 147, 26, 0.6); transform: scale(1.08); }
-    50% { box-shadow: 0 0 100px rgba(247, 147, 26, 1) inset, 0 0 80px rgba(247, 147, 26, 0.8); transform: scale(1.12); }
-    100% { box-shadow: 0 0 30px rgba(247, 147, 26, 0.2) inset, 0 0 10px rgba(247, 147, 26, 0.5); transform: scale(1); }
+    0% { box-shadow: 0 0 80px rgba(247, 147, 26, 0.9) inset, 0 0 60px rgba(247, 147, 26, 0.7); filter: brightness(1.4); }
+    50% { box-shadow: 0 0 120px rgba(247, 147, 26, 1) inset, 0 0 100px rgba(247, 147, 26, 0.9); filter: brightness(1.6); }
+    100% { box-shadow: 0 0 30px rgba(247, 147, 26, 0.2) inset, 0 0 10px rgba(247, 147, 26, 0.5); filter: brightness(1); }
   }
   .cube-merge-pulse .cube-face {
     animation: mergePulse 0.4s ease-out !important;
@@ -468,10 +469,6 @@
         </div>
       </div>
       
-      <button class="mine-btn" id="mine-btn">
-        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        Force Mine Block
-      </button>
     </div>
 
     <!-- Center: 3D Cube -->
@@ -1082,9 +1079,6 @@
         startSimulation();
       }
     }, 5000);
-
-    // Mine button
-    document.getElementById('mine-btn').addEventListener('click', triggerMineBlock);
   }
 
   // Boot
