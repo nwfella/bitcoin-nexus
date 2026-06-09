@@ -627,6 +627,19 @@
   const ctx = canvas.getContext('2d');
   let W, H;
 
+  // ===== DEVICE PERFORMANCE DETECTION =====
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Silk/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+  const isLowPerf = isMobile || !window.matchMedia('(min-resolution: 1.5dppx)').matches === false
+    || navigator.hardwareConcurrency < 4;
+  // Mobile tuning: fewer particles, no shadows, no network lines, no text labels
+  const MAX_PARTICLES = isMobile ? 100 : 350;
+  const USE_SHADOWS = !isMobile;
+  const USE_NETWORK_LINES = !isMobile && !isLowPerf;
+  const USE_LABELS = !isMobile;
+  // Lower canvas resolution on mobile (upscaled by CSS for crispness without GPU cost)
+  const CANVAS_SCALE = isMobile ? 0.6 : 1;
+
   let stats = { tps: 0, count: 0, volume: 0 };
   let txCount = 0;
   let txVolume = 0;
@@ -747,22 +760,25 @@
           ctx.fillStyle = `rgba(247, 147, 26, ${this.alpha * 0.2})`;
           ctx.fill();
         }
-        // Brighter glow when diving
-        ctx.shadowBlur = this.glow * 2;
-        ctx.shadowColor = '#f7931a';
+        if (USE_SHADOWS) {
+          ctx.shadowBlur = this.glow * 2;
+          ctx.shadowColor = '#f7931a';
+        }
       }
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
       ctx.fillStyle = this.color === '#ffffff' 
         ? `rgba(255,255,255,${this.alpha})` 
         : `rgba(247,147,26,${this.alpha})`;
-      ctx.shadowBlur = this.phase === 'dive' ? this.glow * 2 : this.glow;
-      ctx.shadowColor = this.color;
+      if (USE_SHADOWS) {
+        ctx.shadowBlur = this.phase === 'dive' ? this.glow * 2 : this.glow;
+        ctx.shadowColor = this.color;
+      }
       ctx.fill();
       ctx.shadowBlur = 0;
 
       // Satoshi label
-      if (this.maxRadius >= 14 && this.alpha > 0.7 && this.phase !== 'dive') {
+      if (USE_LABELS && this.maxRadius >= 14 && this.alpha > 0.7 && this.phase !== 'dive') {
         ctx.font = '9px "Courier New", monospace';
         ctx.textAlign = 'center';
         ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha * 0.7})`;
@@ -791,7 +807,7 @@
     // Network lines
     ctx.lineWidth = 0.5;
     const maxDist = 80;
-    if (particles.length < 150 && !isExploding) {
+    if (USE_NETWORK_LINES && particles.length < 150 && !isExploding) {
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x;
@@ -874,7 +890,9 @@
     txVolume += (value / 100000000);
     txsThisSecond += 1;
     if (value > largestTx) largestTx = value;
-    if (particles.length < 400) {
+    // On mobile, only add every other tx to keep particle count manageable
+    if (isMobile && Math.random() > 0.5) return;
+    if (particles.length < MAX_PARTICLES) {
       particles.push(new TxParticle(value));
     }
   }
@@ -995,8 +1013,11 @@
   function init() {
     // Canvas sizing
     function resize() {
-      W = canvas.width = window.innerWidth;
-      H = canvas.height = window.innerHeight;
+      W = canvas.width = window.innerWidth * CANVAS_SCALE;
+      H = canvas.height = window.innerHeight * CANVAS_SCALE;
+      // CSS keeps it full-size on screen; canvas renders at lower res
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
     }
     resize();
     window.addEventListener('resize', resize);
