@@ -452,6 +452,10 @@
           <div class="stat-label">Pending Volume</div>
           <div class="stat-value small" id="volume-val">0.00<span class="stat-unit btc">BTC</span></div>
         </div>
+        <div class="stat-box" style="margin-top:16px">
+          <div class="stat-label">Largest Tx</div>
+          <div class="stat-value small" id="largest-tx-val">—</div>
+        </div>
       </div>
       
       <button class="mine-btn" id="mine-btn">
@@ -620,6 +624,7 @@
   let txCount = 0;
   let txVolume = 0;
   let txsThisSecond = 0;
+  let largestTx = 0; // track the biggest tx in satoshis
 
   let particles = [];
   let isSimulated = false;
@@ -635,7 +640,10 @@
   class TxParticle {
     constructor(value) {
       this.value = value;
-      this.radius = Math.max(1.5, Math.min(8, Math.log10(Math.max(value,1)) * 1.5));
+      // Dramatic size scaling: log10 of satoshis (3→9) * 3.5 = 10→32px range
+      this.maxRadius = Math.max(4, Math.min(32, Math.log10(Math.max(value, 1000)) * 3.5));
+      this.radius = 0; // starts at 0, animates up
+      this.spawnFrame = 0;
       const edge = Math.floor(Math.random() * 4);
       if (edge === 0) { this.x = Math.random() * W; this.y = -10; }
       else if (edge === 1) { this.x = W + 10; this.y = Math.random() * H; }
@@ -649,8 +657,14 @@
       this.approachSpeed = 0.02 + Math.random() * 0.03;
       const isHighValue = value > 1000000000;
       this.color = isHighValue ? '#ffffff' : '#f7931a';
-      this.glow = isHighValue ? 20 : 10;
+      this.glow = isHighValue ? 30 : 10;
       this.alpha = 0;
+      // Format satoshi label
+      this.label = value >= 100000000
+        ? (value / 100000000).toFixed(2) + ' BTC'
+        : value >= 10000
+          ? (value / 100000).toFixed(1) + 'K sats'
+          : value.toLocaleString() + ' sats';
     }
     update(isExploding) {
       this.targetX = W / 2;
@@ -662,12 +676,27 @@
         this.orbitRadius = Math.max(120, this.orbitRadius - this.approachSpeed * 100);
         this.angle += this.orbitSpeed;
         if (this.alpha < 1) this.alpha += 0.02;
+        // Spawn animation: radius grows from 0 with slight overshoot
+        this.spawnFrame++;
+        if (this.spawnFrame < 20) {
+          const t = this.spawnFrame / 20;
+          // Ease-out with overshoot (bouncy blip)
+          this.radius = this.maxRadius * (1 - Math.pow(1 - t, 3)) * (1 + 0.2 * Math.sin(t * Math.PI * 2));
+        } else {
+          this.radius = this.maxRadius;
+        }
       }
-      this.x = this.targetX + Math.cos(this.angle) * this.orbitRadius;
-      this.y = this.targetY + Math.sin(this.angle) * this.orbitRadius;
     }
     draw() {
       if (this.alpha <= 0) return;
+      // Outer glow ring (spawn animation flash)
+      if (this.spawnFrame < 30) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(247, 147, 26, ${0.3 * (1 - this.spawnFrame/30)})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
       ctx.fillStyle = this.color === '#ffffff' 
@@ -677,6 +706,13 @@
       ctx.shadowColor = this.color;
       ctx.fill();
       ctx.shadowBlur = 0;
+      // Satoshi label on bigger particles
+      if (this.maxRadius >= 14 && this.alpha > 0.7) {
+        ctx.font = '9px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha * 0.7})`;
+        ctx.fillText(this.label, this.x, this.y - this.radius - 6);
+      }
     }
   }
 
@@ -735,6 +771,7 @@
     txCount += 1;
     txVolume += (value / 100000000);
     txsThisSecond += 1;
+    if (value > largestTx) largestTx = value;
     if (particles.length < 400) {
       particles.push(new TxParticle(value));
     }
@@ -761,6 +798,7 @@
         particles = [];
         txCount = 0;
         txVolume = 0;
+        largestTx = 0;
         miningFlash = false;
         document.getElementById('screen-flash').classList.remove('active');
         renderCanvas(false);
@@ -787,6 +825,17 @@
     document.getElementById('tps-val').textContent = stats.tps;
     document.getElementById('unconfirmed-val').textContent = stats.count.toLocaleString();
     document.getElementById('volume-val').innerHTML = stats.volume.toFixed(2) + '<span class="stat-unit btc">BTC</span>';
+    // Format largest tx for display
+    const lt = document.getElementById('largest-tx-val');
+    if (largestTx >= 100000000) {
+      lt.innerHTML = (largestTx / 100000000).toFixed(2) + '<span class="stat-unit btc">BTC</span>';
+    } else if (largestTx >= 10000) {
+      lt.innerHTML = (largestTx / 100000).toFixed(1) + '<span class="stat-unit" style="color:#9ca3af">K sats</span>';
+    } else if (largestTx > 0) {
+      lt.innerHTML = largestTx.toLocaleString() + '<span class="stat-unit" style="color:#9ca3af"> sats</span>';
+    } else {
+      lt.textContent = '—';
+    }
   }
 
   function updateCubeHeight(height) {
